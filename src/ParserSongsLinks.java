@@ -1,6 +1,9 @@
 import com.mongodb.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.UpdateOptions;
+import org.bson.conversions.Bson;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -8,29 +11,27 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.io.IOException;
-import java.util.Random;
 
 //TODO reconnect refactoring
-//TODO make a links list first, start from previous
-//TODO track updates (on firs page ?) or hash
+//TODO speedup: proxy, threads
+//TODO unit test with mockito
+//Done make a links list first, start from previous
+//Done track updates (parse news page)
 
-public class Parser {
+public class ParserSongsLinks {
     static long counter=0;
-
-    static Random rand = new Random();
-
-    static MongoCollection<org.bson.Document> songs;
+    static MongoCollection<org.bson.Document> links;
 
     public static void main(String[] args) throws IOException {
         connectToDataBase();
-//        parseSongs("http://amdm.ru/");
-        getLinksOfArtists("http://amdm.ru/chords/1/");
+        parseSongs("http://amdm.ru/");
+//        getLinksOfArtists("http://amdm.ru/chords/28/");
     }
 
     private static void connectToDataBase() {
         MongoClient mongoClient = new MongoClient("localhost", 27017);
         MongoDatabase database = mongoClient.getDatabase("SyncSong");
-        songs = database.getCollection("songs");
+        links = database.getCollection("links");
     }
 
     private static void parseSongs(String url) throws IOException {
@@ -56,35 +57,29 @@ public class Parser {
         Document doc = con.get();
         Elements linksOfSongs = doc.select(".artist-profile-song-list .g-link");
         for (Element link : linksOfSongs) {
-            getSong(link.attr("abs:href"));
+            addSongLinkToDatabase(link.attr("abs:href"));
         }
-    }
-
-    private static void getSong(String url) throws IOException {
-        Connection con = connect(url);
-        Document doc = con.get();
-        String artist = doc.select("[itemprop=\"byArtist\"]").first().text();
-        String songName = doc.select("[itemprop=\"name\"]").first().text();
-        String lyric = doc.select("[itemprop=\"chordsBlock\"]").first().text();
-
-        System.out.println(counter++ + " " + artist + " - " + songName);
-
-        addSongToDatabase(artist, songName, lyric);
 
         try {
-            Thread.sleep(1000);
+            Thread.sleep(2000);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
     }
 
-    private static void addSongToDatabase(String artist, String songName, String lyric) {
-        org.bson.Document songDocument = new org.bson.Document
-                ("artist", artist)
-                .append("name", songName)
-                .append("lyric", lyric);
+    private static void addSongLinkToDatabase(String link) {
+        Bson filter = Filters.eq("link", link);
 
-        songs.insertOne(songDocument);
+        Bson update =  new org.bson.Document("$set",
+                new org.bson.Document()
+                .append("link", link)
+                .append("isDownloaded", 0));
+
+        UpdateOptions options = new UpdateOptions().upsert(true);
+
+        links.updateOne(filter, update, options);
+
+        System.out.println(counter++ + " " + link);
     }
 
     private static Connection connect(String url){
